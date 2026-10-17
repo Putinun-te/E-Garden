@@ -2,7 +2,7 @@
 // dashboard, runs the pump schedule, and sends commands to the other nodes.
 //
 // Kept from v1: LoRa pins, web port 8888, NTP settings, pump schedule
-// (on at HH:00, off at HH:01, 08-17), the dashboard page and its routes.
+// (on at HH:00, off at HH:01, 08-17).
 // Changed (approved): protocol v2 with ACK/retry, commands go through a queue
 // executed by the loop task (web handlers never touch the radio), Wi-Fi and
 // LoRa reconnect instead of blocking forever, scheduled commands are sent
@@ -219,6 +219,8 @@ void safeModeCheck() {
 }
 
 }  // namespace
+
+eg::LoRaLink& hubRadio() { return radio; }
 
 void setup() {
   eg::log::begin(115200);
