@@ -1,5 +1,6 @@
 // E-Garden hub node. Ported from the v1-original sketch; logic unchanged.
 #include <Arduino.h>
+#include <EGarden.h>
 // Import libraries
 
 #ifdef ESP32
@@ -22,11 +23,11 @@
 #include "EEPROM.h"
 #include "time.h"
 
-const int output1 = 27;
+const int output1 = eg::hub::PIN_OUTPUT1;
 
-const char* ntpServer = "pool.ntp.org";
-const long  gmtOffset_sec = 3600 * 7;
-const int   daylightOffset_sec = 3600 * 7;
+const char* ntpServer = eg::hub::NTP_SERVER;
+const long  gmtOffset_sec = eg::hub::NTP_GMT_OFFSET_SEC;
+const int   daylightOffset_sec = eg::hub::NTP_DAYLIGHT_OFFSET_SEC;
 char timeHour[3];
 char timeMinute[3];
 
@@ -59,14 +60,11 @@ const char* password = WIFI_PASSWORD;
 
 // LoRa Module pin definition
 // define the pins used by the LoRa transceiver module
-#define ss 5
-#define rst 15
-#define dio0 2
 
 // Initialize variables to get and save LoRa data
 int counter = 0; int readingID = 0;
 int rssi;
-String localAddress = "1";
+String localAddress = String(eg::ADDR_HUB);
 String message;              // outgoing message
 byte msgCount = 0;            // count of outgoing messages
 //byte localAddress_master = 0xBB;     // address of this device
@@ -74,9 +72,9 @@ byte msgCount = 0;            // count of outgoing messages
 //byte localAddress_air = 0x02;     // address of this device
 //byte destination = 0xAA;      // destination to send to
 
-String localAddress_master = "1";     // address of this device
-String localAddress_water = "2";     // address of this device
-String localAddress_air = "3";     // address of this device
+String localAddress_master = String(eg::ADDR_HUB);     // address of this device
+String localAddress_water = String(eg::ADDR_WATER);     // address of this device
+String localAddress_air = String(eg::ADDR_AIR);     // address of this device
 String destination = "0xAB";      // destination to send to
 
 String loRaMessage;
@@ -103,7 +101,7 @@ float ph_value;
 float ec_value;
 
 // Set web server port number to 80
-AsyncWebServer server(8888);
+AsyncWebServer server(eg::hub::WEB_PORT);
 
 // Variable to store the HTTP request
 String header;
@@ -209,14 +207,14 @@ void setup() {
 
   Serial.begin(115200);
 
-  LoRa.setPins(ss, rst, dio0);
-  LoRa.begin(433E6);
-  while (!LoRa.begin(433E6)) {
+  LoRa.setPins(eg::hub::PIN_LORA_SS, eg::hub::PIN_LORA_RST, eg::hub::PIN_LORA_DIO0);
+  LoRa.begin(eg::LORA_FREQUENCY_HZ);
+  while (!LoRa.begin(eg::LORA_FREQUENCY_HZ)) {
     Serial.println(".");
     delay(500);
   }
 
-  LoRa.setSyncWord(0xAB);
+  LoRa.setSyncWord(eg::LORA_SYNC_WORD);
 
   Serial.println("LoRa Initializing OK!");
   // Connect to Wi-Fi network with SSID and password
@@ -541,7 +539,7 @@ void printLocalTime() {
 
 void loop() {
   now = millis();
-  if (now - lastMeasure > 1000) {
+  if (now - lastMeasure > eg::hub::CLOCK_TICK_MS) {
     lastMeasure = now;
     printLocalTime();
   }
@@ -585,7 +583,7 @@ void loop() {
       int pos2 = LoRaData.indexOf('/');
       Local_ID = LoRaData.substring(pos1 + 1, pos2);
       //    Serial.print("     "); Serial.print(Local_ID);
-      if (Local_ID == "2") {
+      if (Local_ID == localAddress_water) {
         Serial.println("Water ID '2'");
         //      int pos1 = LoRaData.indexOf('/');
         int pos3 = LoRaData.indexOf('&');
@@ -604,7 +602,7 @@ void loop() {
         Serial.print("BATT : "); Serial.println(batteryLevel_water);
         Send_API_WATER = true;
       }
-      else if (Local_ID == "3") {
+      else if (Local_ID == localAddress_air) {
         Serial.println("Air ID '3'");
         int pos3 = LoRaData.indexOf('&');
         int pos4 = LoRaData.indexOf('$');
@@ -622,7 +620,7 @@ void loop() {
 
         Send_API_AIR = true;
       }
-      else if (Local_ID == "123") {
+      else if (Local_ID == String(eg::ADDR_PUMP)) {
         Serial.println("Air ID '3'");
         int pos3 = LoRaData.indexOf('&');
         int pos4 = LoRaData.indexOf('$');

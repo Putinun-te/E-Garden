@@ -1,13 +1,11 @@
 // E-Garden pump node. Ported from the v1-original sketch; logic unchanged.
 #include <Arduino.h>
+#include <EGarden.h>
 #include <SPI.h>
 #include <LoRa.h>
 
-#define ss 5
-#define rst 14
-#define dio0 2
 
-#define IED 26
+#define IED eg::pump::PIN_RELAY
 
 unsigned long lasttime ;
 unsigned long lasttime2 ;
@@ -29,7 +27,7 @@ String batteryLevel_water;
 String ph;
 String ec;
 
-String localAddress = "123";
+String localAddress = String(eg::ADDR_PUMP);
 
 bool CoC = false;
 bool Relay = false;
@@ -38,7 +36,7 @@ bool start_timer = false;
 String Data1;
 
 bool state_pump = false;
-int Time_State = 90000;
+unsigned long Time_State = eg::pump::MAX_ON_MS;
 
 unsigned long previousMillis = 0;
 const long interval = 1000;
@@ -55,15 +53,15 @@ void setup() {
   Serial.println("LoRa Receiver");
 
 
-  LoRa.setPins(ss, rst, dio0);//setup LoRa transceiver module
+  LoRa.setPins(eg::pump::PIN_LORA_SS, eg::pump::PIN_LORA_RST, eg::pump::PIN_LORA_DIO0);//setup LoRa transceiver module
 
   int counter = 0;
-  while (!LoRa.begin(433E6) && counter < 30) {
+  while (!LoRa.begin(eg::LORA_FREQUENCY_HZ) && counter < eg::LORA_INIT_ATTEMPTS) {
     Serial.print(".");
     counter++;
     delay(500);
   }
-  LoRa.setSyncWord(0xAB);
+  LoRa.setSyncWord(eg::LORA_SYNC_WORD);
   LoRa.onReceive(onReceive);
   LoRa.receive();
   Serial.println("LoRa Initializing OK!");
@@ -102,7 +100,7 @@ void onReceive(int packetSize) {
     Local_ID = LoRaData.substring(pos1 + 1, pos2);
     Serial.println(Local_ID);
 
-    if (Local_ID == "1") {
+    if (Local_ID == String(eg::ADDR_HUB)) {
       int pos3 = LoRaData.indexOf('&');
       Data1 = LoRaData.substring(pos2 + 1, pos3);
       Serial.println(Data1);

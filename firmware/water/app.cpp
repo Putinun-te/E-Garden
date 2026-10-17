@@ -1,26 +1,24 @@
 // E-Garden water node. Ported from the v1-original sketch; logic unchanged.
 #include <Arduino.h>
+#include <EGarden.h>
 // Libraries for LoRa Module
 #include <SPI.h>
 #include <LoRa.h>
 #include <SoftwareSerial.h>
 
-#define ss 5
-#define rst 15
-#define dio0 17
-#define RE 32
-#define DE 33
+#define RE eg::water::PIN_RS485_RE
+#define DE eg::water::PIN_RS485_DE
 
 
-#define Pump_A 21
-#define Pump_B 2
-#define Pump_C 0
+#define Pump_A eg::water::PIN_DOSE_STEP_ACID
+#define Pump_B eg::water::PIN_DOSE_STEP_B
+#define Pump_C eg::water::PIN_DOSE_STEP_A
 
-#define X_DIR 16
-#define X_EN 4
+#define X_DIR eg::water::PIN_DOSE_DIR
+#define X_EN eg::water::PIN_DOSE_EN
 
 String message;
-String localAddress = "2";
+String localAddress = String(eg::ADDR_WATER);
 
 String ADD; String Value;
 
@@ -44,7 +42,7 @@ byte values_ec[11];
 
 unsigned long lasttime ;
 
-SoftwareSerial mod(26, 27);
+SoftwareSerial mod(eg::water::PIN_RS485_RX, eg::water::PIN_RS485_TX);
 
 float PH, TEMP;
 int EC;
@@ -79,9 +77,9 @@ void step (boolean dir, byte dirPin, byte stepperPin, int steps) {
   for (int i = 0; i < steps; i++)
   {
     digitalWrite (stepperPin, HIGH);
-    delayMicroseconds (150);
+    delayMicroseconds (eg::water::STEP_HALF_PERIOD_US);
     digitalWrite (stepperPin, LOW);
-    delayMicroseconds (150);
+    delayMicroseconds (eg::water::STEP_HALF_PERIOD_US);
   }
 }
 
@@ -96,7 +94,7 @@ void start_timer_do() {
 void setup() {
 
   Serial.begin(115200);
-  mod.begin(9600);
+  mod.begin(eg::water::RS485_BAUD);
   pinMode(STEP, OUTPUT);
   pinMode(DIR, OUTPUT);
   pinMode(RE, OUTPUT);
@@ -109,19 +107,19 @@ void setup() {
   pinMode (X_DIR, OUTPUT);
   digitalWrite (X_EN, LOW);
 
-  LoRa.setPins(ss, rst, dio0);
+  LoRa.setPins(eg::water::PIN_LORA_SS, eg::water::PIN_LORA_RST, eg::water::PIN_LORA_DIO0);
   Serial.println("initializing LoRa");
   int counter = 0;
-  while (!LoRa.begin(433E6) && counter < 30) {
+  while (!LoRa.begin(eg::LORA_FREQUENCY_HZ) && counter < eg::LORA_INIT_ATTEMPTS) {
     Serial.print(".");
     counter++;
     delay(500);
   }
-  if (counter == 30) {
+  if (counter == eg::LORA_INIT_ATTEMPTS) {
     readingID++;
     Serial.println("Failed to initialize LoRa. Going to sleep now");
   }
-  LoRa.setSyncWord(0xAB);
+  LoRa.setSyncWord(eg::LORA_SYNC_WORD);
   Serial.println("LoRa initializing OK!");
 
   LoRa.onReceive(onReceive);
@@ -131,7 +129,7 @@ void setup() {
 void loop() {
   start_timer_do();
   now = millis();
-  if (start_timer && (now - lastMeasure > 30000)) {
+  if (start_timer && (now - lastMeasure > eg::water::MEASURE_INTERVAL_MS)) {
     Do();
     start_timer = false;
   }
@@ -143,7 +141,7 @@ void loop() {
     LoRa.print("");
     LoRa.endPacket();
     for (int a = 0; a < Var1; a++) {
-      step (false, X_DIR, Pump_C, 4100);
+      step (eg::water::DOSE_DIRECTION, X_DIR, Pump_C, eg::water::STEPS_PER_UNIT_A);
     }
     digitalWrite (X_EN, LOW);
     Open1 = false;
@@ -154,7 +152,7 @@ void loop() {
     LoRa.print("");
     LoRa.endPacket();
     for (int a = 0; a < Var2; a++) {
-      step (false, X_DIR, Pump_B, 3900);
+      step (eg::water::DOSE_DIRECTION, X_DIR, Pump_B, eg::water::STEPS_PER_UNIT_B);
     }
     digitalWrite (X_EN, LOW);
     Open2 = false;
@@ -164,7 +162,7 @@ void loop() {
     LoRa.print("");
     LoRa.endPacket();
     for (int a = 0; a < Var3; a++) {
-      step (false, X_DIR, Pump_A, 4050);
+      step (eg::water::DOSE_DIRECTION, X_DIR, Pump_A, eg::water::STEPS_PER_UNIT_ACID);
     }
     LoRa.receive();
     digitalWrite (X_EN, LOW);
@@ -289,7 +287,7 @@ void onReceive(int packetSize) {
     int pos3 = LoRaData.indexOf('&');
     int pos4 = LoRaData.indexOf('$');
     Local_ID = LoRaData.substring(pos1 + 1, pos2);
-    if (Local_ID == "1") {
+    if (Local_ID == String(eg::ADDR_HUB)) {
       ADD = LoRaData.substring(pos2 + 1, pos3);
       Value = LoRaData.substring(pos3 + 1, pos4);
       Serial.println(ADD); Serial.println(Value);

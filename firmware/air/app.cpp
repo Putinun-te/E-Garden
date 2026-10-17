@@ -1,5 +1,6 @@
 // E-Garden air node. Ported from the v1-original sketch; logic unchanged.
 #include <Arduino.h>
+#include <EGarden.h>
 #include <SPI.h>
 #include <LoRa.h>
 #include <SoftwareSerial.h>
@@ -8,12 +9,9 @@
 #include <Wire.h>
 #include <BH1750.h>
 #include <Adafruit_AHTX0.h>
-#define ss 5
-#define rst 15
-#define dio0 2
 
 String message;
-String localAddress = "2";
+String localAddress = String(eg::ADDR_AIR);  // v1 sent "2": changed (approved A)
 
 BH1750 lightMeter;
 
@@ -22,14 +20,14 @@ Adafruit_AHTX0 aht;
 RTC_DATA_ATTR int readingID = 0;
 
 uint64_t uS_TO_S_FACTOR = 1000000;  // Conversion factor for micro seconds to seconds
-uint64_t TIME_TO_SLEEP = 10;
+uint64_t TIME_TO_SLEEP = eg::air::SLEEP_SECONDS;
 
 float light;
 float Temp;
 float Humid;
 
 float batteryLevel;
-const int batteryPin = 36;
+const int batteryPin = eg::air::PIN_BATTERY;
 const int RELAY_PIN = 27;
 
 // Forward declarations (the Arduino IDE generates these for .ino files, .cpp needs them)
@@ -42,23 +40,23 @@ void setup() {
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   pinMode(RELAY_PIN, OUTPUT);
 
-  LoRa.setPins(ss, rst, dio0);
+  LoRa.setPins(eg::air::PIN_LORA_SS, eg::air::PIN_LORA_RST, eg::air::PIN_LORA_DIO0);
   Serial.println("initializing LoRa");
 
   int counter = 0;
-  while (!LoRa.begin(433E6) && counter < 30) {
+  while (!LoRa.begin(eg::LORA_FREQUENCY_HZ) && counter < eg::LORA_INIT_ATTEMPTS) {
     Serial.print(".");
     counter++;
     delay(500);
   }
-  if (counter == 30) {
+  if (counter == eg::LORA_INIT_ATTEMPTS) {
     // Increment readingID on every new reading
     readingID++;
     // Start deep sleep
     Serial.println("Failed to initialize LoRa. Going to sleep now");
     esp_deep_sleep_start();
   }
-  LoRa.setSyncWord(0xAA);
+  LoRa.setSyncWord(eg::LORA_SYNC_WORD);  // v1 used 0xAA: changed (approved A)
   Serial.println("LoRa initializing OK!");
 
 
@@ -109,14 +107,14 @@ void getReadings() {
   Humid = humidity.relative_humidity;
 
   float analog_volt = 0;
-  for (int i = 0; i < 20; i++)
+  for (int i = 0; i < eg::air::BATTERY_SAMPLES; i++)
   {
     analog_volt += analogRead(batteryPin);
-    delay(50);
+    delay(eg::air::BATTERY_SAMPLE_GAP_MS);
   }
-  float batteryVolt = ((analog_volt / 20) / 4095) * 4.2;
+  float batteryVolt = ((analog_volt / eg::air::BATTERY_SAMPLES) / 4095) * eg::air::BATTERY_FULL_VOLTS;
   analog_volt = 0;
-  batteryLevel = (batteryVolt / 4.2) * 100;
+  batteryLevel = (batteryVolt / eg::air::BATTERY_FULL_VOLTS) * 100;
 }
 
 void sendReadings() {
