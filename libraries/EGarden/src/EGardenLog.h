@@ -4,15 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef EG_LOG_LINES
-#define EG_LOG_LINES 8  // the hub raises this with -DEG_LOG_LINES=...
-#endif
 #define EG_LOG_LINE_LEN 120
 
 namespace eg {
 namespace log {
 
-void begin(unsigned long baud = 115200);
+// capacity = number of lines kept in RAM for log::forEachSince (the hub keeps
+// 100 for its web console; the other nodes only need a few).
+void begin(unsigned long baud = 115200, uint16_t capacity = 8);
 void printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
 // Id of the newest buffered line (0 = nothing logged yet). Ids keep increasing.

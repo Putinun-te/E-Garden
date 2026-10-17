@@ -223,7 +223,7 @@ void safeModeCheck() {
 eg::LoRaLink& hubRadio() { return radio; }
 
 void setup() {
-  eg::log::begin(115200);
+  eg::log::begin(115200, 100);  // 100 lines for the web console
   hubapp::stateInit();
   pinMode(eg::hub::PIN_OUTPUT1, OUTPUT);  // v1
 

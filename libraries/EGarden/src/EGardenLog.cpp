@@ -10,13 +10,18 @@ namespace eg {
 namespace log {
 
 namespace {
-char lines[EG_LOG_LINES][EG_LOG_LINE_LEN];
-uint32_t newestId = 0;  // id of lines[(newestId - 1) % EG_LOG_LINES]
+char (*lines)[EG_LOG_LINE_LEN] = nullptr;  // capacity lines, allocated in begin()
+uint16_t capacity = 0;
+uint32_t newestId = 0;  // id of lines[(newestId - 1) % capacity]
 SemaphoreHandle_t lock = nullptr;
 }  // namespace
 
-void begin(unsigned long baud) {
+void begin(unsigned long baud, uint16_t lineCapacity) {
   if (!lock) lock = xSemaphoreCreateMutex();
+  if (!lines && lineCapacity) {
+    lines = static_cast<char (*)[EG_LOG_LINE_LEN]>(calloc(lineCapacity, EG_LOG_LINE_LEN));
+    capacity = lines ? lineCapacity : 0;
+  }
   Serial.begin(baud);
 }
 
@@ -29,9 +34,9 @@ void printf(const char* fmt, ...) {
   if (n > 0 && (size_t)n < sizeof(buf)) vsnprintf(buf + n, sizeof(buf) - n, fmt, args);
   va_end(args);
   Serial.println(buf);
-  if (!lock) return;
+  if (!lock || !capacity) return;
   if (xSemaphoreTake(lock, pdMS_TO_TICKS(20)) == pdTRUE) {
-    strcpy(lines[newestId % EG_LOG_LINES], buf);
+    strcpy(lines[newestId % capacity], buf);
     newestId++;
     xSemaphoreGive(lock);
   }
@@ -40,17 +45,17 @@ void printf(const char* fmt, ...) {
 uint32_t lastId() { return newestId; }
 
 uint32_t forEachSince(uint32_t since, void (*fn)(uint32_t, const char*, void*), void* ctx) {
-  if (!lock) return since;
+  if (!lock || !capacity) return since;
   char copy[EG_LOG_LINE_LEN];
   uint32_t last = since;
   for (;;) {
     bool have = false;
     uint32_t id = 0;
     if (xSemaphoreTake(lock, pdMS_TO_TICKS(20)) != pdTRUE) break;
-    uint32_t oldest = newestId > EG_LOG_LINES ? newestId - EG_LOG_LINES + 1 : 1;
+    uint32_t oldest = newestId > capacity ? newestId - capacity + 1 : 1;
     id = last + 1 < oldest ? oldest : last + 1;
     if (id <= newestId) {
-      strcpy(copy, lines[(id - 1) % EG_LOG_LINES]);
+      strcpy(copy, lines[(id - 1) % capacity]);
       have = true;
     }
     xSemaphoreGive(lock);
