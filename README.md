@@ -17,7 +17,6 @@ E-Garden was a team project of 5 students: 2 on hardware, 1 on the website, and 
 
 - The v1 code (tag `v1-original`) contains form/SPIFFS handling and a DHT web-server sketch adapted from [Random Nerd Tutorials](https://randomnerdtutorials.com) (Rui Santos). That code is not used on this branch.
 - Libraries: [arduino-LoRa](https://github.com/sandeepmistry/arduino-LoRa), [ESPAsyncWebServer and AsyncTCP](https://github.com/ESP32Async) (ESP32Async), Adafruit AHTX0, BH1750, Unity (tests).
-- The modernization (v2) was done with help from Claude Code (AI pair programming).
 
 ## Nodes
 
