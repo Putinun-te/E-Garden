@@ -1,0 +1,70 @@
+name: Build
+
+on:
+  push:
+    branches: [main, "modernize/**"]
+  pull_request:
+
+jobs:
+  platformio:
+    name: PlatformIO (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [hub, hub_all_features, water, air, pump]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+      - run: pip install platformio==6.2.0
+      - name: Build ${{ matrix.env }} (secrets.h comes from secrets.h.example)
+        run: pio run -e ${{ matrix.env }}
+
+  native-tests:
+    name: Unit tests (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install platformio==6.2.0
+      - run: pio test -e native
+
+  web-page:
+    name: Embedded web page is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/embed_web.py --check
+
+  arduino-ide:
+    name: Arduino IDE build (${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [hub, water, air, pump]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Use the repository as sketchbook (so libraries/EGarden is found)
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config set directories.user "$GITHUB_WORKSPACE"
+      - name: Install core 2.0.17 and libraries
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@2.0.17 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install "LoRa@0.8.0" "BH1750@1.3.0" "Adafruit AHTX0@2.0.5"
+          arduino-cli lib install "Async TCP@3.4.7" "ESP Async WebServer@3.8.0"
+      - name: Compile
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 firmware/${{ matrix.node }}
