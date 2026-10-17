@@ -1,3 +1,5 @@
+// E-Garden water node. Ported from the v1-original sketch; logic unchanged.
+#include <Arduino.h>
 // Libraries for LoRa Module
 #include <SPI.h>
 #include <LoRa.h>
@@ -59,6 +61,18 @@ bool Open1 = false; bool Open2 = false; bool Open3 = false;
 long now = millis();
 long lastMeasure = 0;
 bool start_timer = false;
+
+// Forward declarations (the Arduino IDE generates these for .ino files, .cpp needs them)
+void step(boolean dir, byte dirPin, byte stepperPin, int steps);
+void start_timer_do();
+void getReadings();
+void sendReadings();
+void Read_all_sensor();
+void Read_PH_TEMP();
+void Read_EC();
+void clear_sensor485();
+void Do();
+void onReceive(int packetSize);
 
 void step (boolean dir, byte dirPin, byte stepperPin, int steps) {
   digitalWrite (dirPin, dir);

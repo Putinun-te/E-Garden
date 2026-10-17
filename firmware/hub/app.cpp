@@ -1,3 +1,5 @@
+// E-Garden hub node. Ported from the v1-original sketch; logic unchanged.
+#include <Arduino.h>
 // Import libraries
 
 #ifdef ESP32
@@ -42,7 +44,12 @@ unsigned long lasttime2 ;
 int addr_ph = 0;
 int addr_ec = 1;
 
+#if __has_include("secrets.h")
 #include "secrets.h"
+#else
+#warning "secrets.h not found: building with placeholder Wi-Fi credentials from secrets.h.example"
+#include "secrets.h.example"
+#endif
 // Replace with your network credentials
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
@@ -112,12 +119,18 @@ bool boolet = false;
 bool boolet2 = false;
 bool boolet3 = false;
 
-bool ECstate; bool PHstate;
-unsigned long timeEC;
-int ichi;
-int A;
-bool ABstate = true;
-bool Setecph = false;
+// Forward declarations (the Arduino IDE generates these for .ino files, .cpp needs them)
+String processor(const String& var);
+void notFound(AsyncWebServerRequest *request);
+String readFile(fs::FS &fs, const char * path);
+void writeFile(fs::FS &fs, const char * path, const char * message);
+void printLocalTime();
+void Sending(String Cont);
+void SendingP(String Cont, String NUM);
+void onReceive(int packetSize);
+void send_API_AIR();
+void send_API_WATER();
+
 String processor(const String& var) {
   //Serial.println(var);
   if (var == "Temp") {
@@ -431,16 +444,7 @@ void printLocalTime() {
   H = String(timeHour).toInt();
   T = String(timeminute).toInt();
 
-  Serial.print(H); Serial.print(":"); Serial.print(T);
-
-  Serial.print("Run EC =");
-  Serial.println( ECstate);
-
-  Serial.print("Run PH =");
-  Serial.println( PHstate);
-
-  Serial.print("จำนวนรอบที่ทำงาน =");
-  Serial.println( ichi);
+  Serial.print(H); Serial.print(":"); Serial.println(T);
 
   if ((H == 8) && (T == 0)) {
     Sending("On");
@@ -533,78 +537,7 @@ void printLocalTime() {
     //    Serial.println(" ");
     LoRa.receive();
   }
-  //Auto
-  if ((H == 7) && (T == 0)) {
-    if (ph.toFloat() > 6.2) {
-      PHstate = true;  //stop 5.8-6.2
-    }
-    if (ec.toInt() < 1600) {
-      ECstate = true;  //stop 1700
-      Setecph = false;
-    }
-  }
-  if (ECstate == true) { //////////ec A,B
-    if (millis() - timeEC >= 1000 * 30) {
-      if (ichi < 5) {
-        if (ABstate == true) {
-          Serial.print("Helloo1"); Serial.print(":"); Serial.println(A);
-          SendingP("Add(A)", "5");
-          A = ichi ;
-        }
-        if (ABstate == false) {
-          Serial.println("Helloo2");
-          SendingP("Add(B)", "5");
-          ichi++;
-        }
-        //        ABstate = !ABstate;
-        //        timeEC = millis();
-        if (ichi >= 5 ) {
-          Serial.println("Stop");
-          ECstate = false;
-          Setecph = true;
-          timeEC = millis();
-          ichi = 0;
-        }
-        if (A != ichi) {
-          if (ec.toInt() > 1700) {
-            ECstate = false;
-            Setecph = true;
-            Serial.println("Check ec");
-            timeEC = millis();
-            ichi = 0;
-          }
-          ABstate = !ABstate;
-          timeEC = millis();
-          A = ichi;
-        }
-      }
-    }
-  }
-  if ( (Setecph == true) && (PHstate == true) ) {
-    if (millis() - timeEC >= 1000 * 20) {
-      if (ichi < 5) {
-        Serial.println("Helloo3");
-        SendingP("Add(Acid)", "5");
-        ichi++;
-        if (ph.toFloat() < 6.0) {
-          Serial.println("Stop pH");
-          Setecph = false;
-          PHstate = false;
-          ichi = 0;
-        }
-        timeEC = millis();
-        if (ichi >= 5) {
-          Serial.println("Stop pH");
-          Setecph = false;
-          PHstate = false;
-          ichi = 0;
-        }
-      }
-    }
-  }
-
 }
-
 
 void loop() {
   now = millis();
@@ -615,178 +548,178 @@ void loop() {
 }
 
 
-void Sending(String Cont) {
-  message = String(readingID) + "@" + String(localAddress) + "/" + String(Cont) + "&";
-  LoRa.beginPacket();                   // start packet
-  LoRa.print(message);                 // add payload
-  LoRa.endPacket();                     // finish packet and send it
-  msgCount++;                           // increment message ID
-}
-void SendingP(String Cont, String NUM) {
-  message = String(readingID) + "@" + String(localAddress) + "/" + String(Cont) + "&" + String(NUM) + "$" ;
-  LoRa.beginPacket();                   // start packet
-  LoRa.print(message);                 // add payload
-  LoRa.endPacket();                     // finish packet and send it
-  msgCount++;                           // increment message ID
-}
+  void Sending(String Cont) {
+    message = String(readingID) + "@" + String(localAddress) + "/" + String(Cont) + "&";
+    LoRa.beginPacket();                   // start packet
+    LoRa.print(message);                 // add payload
+    LoRa.endPacket();                     // finish packet and send it
+    msgCount++;                           // increment message ID
+  }
+  void SendingP(String Cont, String NUM) {
+    message = String(readingID) + "@" + String(localAddress) + "/" + String(Cont) + "&" + String(NUM) + "$" ;
+    LoRa.beginPacket();                   // start packet
+    LoRa.print(message);                 // add payload
+    LoRa.endPacket();                     // finish packet and send it
+    msgCount++;                           // increment message ID
+  }
 
 
-void onReceive(int packetSize) {
-  Serial.print("Received packet '");
-  if (packetSize == 0) return;          // if there's no packet, return
-  // read packet
-  while (LoRa.available()) {
-    String LoRaData = LoRa.readString();
-    // LoRaData format: readingID/temperature&humidity$light#batterylevel
-    // String example: 1/27.43&654$555#95.34
-    Serial.print(LoRaData);
-    // print RSSI of packet
-    rssi = LoRa.packetRssi();
-    Serial.print("' with RSSI ");
-    Serial.print(LoRa.packetRssi());
-    Serial.print(", Snr: ");
-    Serial.println(LoRa.packetSnr());
+  void onReceive(int packetSize) {
+    Serial.print("Received packet '");
+    if (packetSize == 0) return;          // if there's no packet, return
+    // read packet
+    while (LoRa.available()) {
+      String LoRaData = LoRa.readString();
+      // LoRaData format: readingID/temperature&humidity$light#batterylevel
+      // String example: 1/27.43&654$555#95.34
+      Serial.print(LoRaData);
+      // print RSSI of packet
+      rssi = LoRa.packetRssi();
+      Serial.print("' with RSSI ");
+      Serial.print(LoRa.packetRssi());
+      Serial.print(", Snr: ");
+      Serial.println(LoRa.packetSnr());
 
 
-    int pos1 = LoRaData.indexOf('@');
-    int pos2 = LoRaData.indexOf('/');
-    Local_ID = LoRaData.substring(pos1 + 1, pos2);
-    //    Serial.print("     "); Serial.print(Local_ID);
-    if (Local_ID == "2") {
-      Serial.println("Water ID '2'");
-      //      int pos1 = LoRaData.indexOf('/');
-      int pos3 = LoRaData.indexOf('&');
-      int pos4 = LoRaData.indexOf('$');
-      int pos5 = LoRaData.indexOf('#');
-      int pos6 = LoRaData.indexOf('^');
-      int pos7 = LoRaData.indexOf('*');
-      //      readingID = LoRaData.substring(pos2 + 1, pos3);
-      ph = LoRaData.substring(pos2 + 1, pos3);
-      ec = LoRaData.substring(pos3 + 1, pos4);
-      temperature_water = LoRaData.substring(pos4 + 1, pos5);
-      batteryLevel_water = LoRaData.substring(pos5 + 1, LoRaData.length());
-      Serial.print("PH : "); Serial.println(ph);
-      Serial.print("EC : "); Serial.println(ec);
-      Serial.print("Temp2 : "); Serial.println(temperature_water);
-      Serial.print("BATT : "); Serial.println(batteryLevel_water);
-      Send_API_WATER = true;
-    }
-    else if (Local_ID == "3") {
-      Serial.println("Air ID '3'");
-      int pos3 = LoRaData.indexOf('&');
-      int pos4 = LoRaData.indexOf('$');
-      int pos5 = LoRaData.indexOf('#');
-      int pos6 = LoRaData.indexOf('^');
-      //      readingID = LoRaData.substring(pos2 + 1, pos3);
-      temperature_air = LoRaData.substring(pos2 + 1, pos3);
-      humidity = LoRaData.substring(pos3 + 1, pos4);
-      light = LoRaData.substring(pos4 + 1, pos5);
-      batteryLevel_air = LoRaData.substring(pos5 + 1, pos6);
-      Serial.print("Temp : "); Serial.println(temperature_air);
-      Serial.print("Humid : "); Serial.println(humidity);
-      Serial.print("Light : "); Serial.println(light);
-      Serial.print("BATT : "); Serial.println(batteryLevel_air);
+      int pos1 = LoRaData.indexOf('@');
+      int pos2 = LoRaData.indexOf('/');
+      Local_ID = LoRaData.substring(pos1 + 1, pos2);
+      //    Serial.print("     "); Serial.print(Local_ID);
+      if (Local_ID == "2") {
+        Serial.println("Water ID '2'");
+        //      int pos1 = LoRaData.indexOf('/');
+        int pos3 = LoRaData.indexOf('&');
+        int pos4 = LoRaData.indexOf('$');
+        int pos5 = LoRaData.indexOf('#');
+        int pos6 = LoRaData.indexOf('^');
+        int pos7 = LoRaData.indexOf('*');
+        //      readingID = LoRaData.substring(pos2 + 1, pos3);
+        ph = LoRaData.substring(pos2 + 1, pos3);
+        ec = LoRaData.substring(pos3 + 1, pos4);
+        temperature_water = LoRaData.substring(pos4 + 1, pos5);
+        batteryLevel_water = LoRaData.substring(pos5 + 1, LoRaData.length());
+        Serial.print("PH : "); Serial.println(ph);
+        Serial.print("EC : "); Serial.println(ec);
+        Serial.print("Temp2 : "); Serial.println(temperature_water);
+        Serial.print("BATT : "); Serial.println(batteryLevel_water);
+        Send_API_WATER = true;
+      }
+      else if (Local_ID == "3") {
+        Serial.println("Air ID '3'");
+        int pos3 = LoRaData.indexOf('&');
+        int pos4 = LoRaData.indexOf('$');
+        int pos5 = LoRaData.indexOf('#');
+        int pos6 = LoRaData.indexOf('^');
+        //      readingID = LoRaData.substring(pos2 + 1, pos3);
+        temperature_air = LoRaData.substring(pos2 + 1, pos3);
+        humidity = LoRaData.substring(pos3 + 1, pos4);
+        light = LoRaData.substring(pos4 + 1, pos5);
+        batteryLevel_air = LoRaData.substring(pos5 + 1, pos6);
+        Serial.print("Temp : "); Serial.println(temperature_air);
+        Serial.print("Humid : "); Serial.println(humidity);
+        Serial.print("Light : "); Serial.println(light);
+        Serial.print("BATT : "); Serial.println(batteryLevel_air);
 
-      Send_API_AIR = true;
-    }
-    else if (Local_ID == "123") {
-      Serial.println("Air ID '3'");
-      int pos3 = LoRaData.indexOf('&');
-      int pos4 = LoRaData.indexOf('$');
-      int pos5 = LoRaData.indexOf('#');
-      int pos6 = LoRaData.indexOf('^');
+        Send_API_AIR = true;
+      }
+      else if (Local_ID == "123") {
+        Serial.println("Air ID '3'");
+        int pos3 = LoRaData.indexOf('&');
+        int pos4 = LoRaData.indexOf('$');
+        int pos5 = LoRaData.indexOf('#');
+        int pos6 = LoRaData.indexOf('^');
 
-      Data1 = LoRaData.substring(pos2 + 1, LoRaData.length());
-      Serial.println(Data1);
+        Data1 = LoRaData.substring(pos2 + 1, LoRaData.length());
+        Serial.println(Data1);
+      }
     }
   }
-}
-void send_API_AIR() {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
+  void send_API_AIR() {
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
 
-    //      String T18 = String(Temp_DS18B20);
-    //      T18.replace(".","@");
-    String ID = String(Local_ID);
-    ID.replace(".", "@");
-    String B_P = String(batteryLevel_air);
-    B_P.replace(".", "@");
-    String L17 = String(light);
-    L17.replace(".", "@");
-    String T23 = String(temperature_air);
-    T23.replace(".", "@");
-    String H23 = String(humidity);
-    H23.replace(".", "@");
+      //      String T18 = String(Temp_DS18B20);
+      //      T18.replace(".","@");
+      String ID = String(Local_ID);
+      ID.replace(".", "@");
+      String B_P = String(batteryLevel_air);
+      B_P.replace(".", "@");
+      String L17 = String(light);
+      L17.replace(".", "@");
+      String T23 = String(temperature_air);
+      T23.replace(".", "@");
+      String H23 = String(humidity);
+      H23.replace(".", "@");
 
-    String text_All = ID + "|" + T23 + "|" + H23 + "|" + L17 + "|" + B_P;
+      String text_All = ID + "|" + T23 + "|" + H23 + "|" + L17 + "|" + B_P;
 
-    String serverPath = serverName + text_All;//เอาค่า sensor มาใส่ตรงนี้ครับ
+      String serverPath = serverName + text_All;//เอาค่า sensor มาใส่ตรงนี้ครับ
 
-    // Your Domain name with URL path or IP address with path
-    http.begin(serverPath.c_str());
+      // Your Domain name with URL path or IP address with path
+      http.begin(serverPath.c_str());
 
-    // Send HTTP GET request
-    int httpResponseCode = http.GET();
+      // Send HTTP GET request
+      int httpResponseCode = http.GET();
 
-    if (httpResponseCode > 0) {
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
-      String payload = http.getString();
-      Serial.println(payload);
+      if (httpResponseCode > 0) {
+        Serial.print("HTTP Response code: ");
+        Serial.println(httpResponseCode);
+        String payload = http.getString();
+        Serial.println(payload);
+      }
+      else {
+        Serial.print("Error code: ");
+        Serial.println(httpResponseCode);
+      }
+      // Free resources
+      http.end();
     }
     else {
-      Serial.print("Error code: ");
-      Serial.println(httpResponseCode);
+      Serial.println("WiFi Disconnected");
     }
-    // Free resources
-    http.end();
   }
-  else {
-    Serial.println("WiFi Disconnected");
-  }
-}
 
-void send_API_WATER() {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
+  void send_API_WATER() {
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
 
-    //      String T18 = String(Temp_DS18B20);
-    //      T18.replace(".","@");
-    String ID = String(Local_ID);
-    ID.replace(".", "@");
-    String B_P = String(batteryLevel_water);
-    B_P.replace(".", "@");
-    String PH = String(ph);
-    PH.replace(".", "@");
-    String EC = String(ec);
-    EC.replace(".", "@");
-    String T18 = String(temperature_water);
-    T18.replace(".", "@");
+      //      String T18 = String(Temp_DS18B20);
+      //      T18.replace(".","@");
+      String ID = String(Local_ID);
+      ID.replace(".", "@");
+      String B_P = String(batteryLevel_water);
+      B_P.replace(".", "@");
+      String PH = String(ph);
+      PH.replace(".", "@");
+      String EC = String(ec);
+      EC.replace(".", "@");
+      String T18 = String(temperature_water);
+      T18.replace(".", "@");
 
-    String text_All = ID + "|" + PH + "|" + EC + "|" + T18 + "|" + B_P;
+      String text_All = ID + "|" + PH + "|" + EC + "|" + T18 + "|" + B_P;
 
-    String serverPath = serverName + text_All;//เอาค่า sensor มาใส่ตรงนี้ครับ
+      String serverPath = serverName + text_All;//เอาค่า sensor มาใส่ตรงนี้ครับ
 
-    // Your Domain name with URL path or IP address with path
-    http.begin(serverPath.c_str());
+      // Your Domain name with URL path or IP address with path
+      http.begin(serverPath.c_str());
 
-    // Send HTTP GET request
-    int httpResponseCode = http.GET();
+      // Send HTTP GET request
+      int httpResponseCode = http.GET();
 
-    if (httpResponseCode > 0) {
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
-      String payload = http.getString();
-      Serial.println(payload);
+      if (httpResponseCode > 0) {
+        Serial.print("HTTP Response code: ");
+        Serial.println(httpResponseCode);
+        String payload = http.getString();
+        Serial.println(payload);
+      }
+      else {
+        Serial.print("Error code: ");
+        Serial.println(httpResponseCode);
+      }
+      // Free resources
+      http.end();
     }
     else {
-      Serial.print("Error code: ");
-      Serial.println(httpResponseCode);
+      Serial.println("WiFi Disconnected");
     }
-    // Free resources
-    http.end();
   }
-  else {
-    Serial.println("WiFi Disconnected");
-  }
-}

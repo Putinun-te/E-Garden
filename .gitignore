@@ -23,3 +23,6 @@ build/
 *.swp
 *~
 .arduino15/
+
+# PlatformIO
+.pio/

@@ -1,3 +1,5 @@
+// E-Garden pump node. Ported from the v1-original sketch; logic unchanged.
+#include <Arduino.h>
 #include <SPI.h>
 #include <LoRa.h>
 
@@ -40,6 +42,10 @@ int Time_State = 90000;
 
 unsigned long previousMillis = 0;
 const long interval = 1000;
+
+// Forward declarations (the Arduino IDE generates these for .ino files, .cpp needs them)
+void onReceive(int packetSize);
+void start_timer_pump();
 
 void setup() {
   pinMode(IED, OUTPUT);

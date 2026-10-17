@@ -1,3 +1,5 @@
+// E-Garden air node. Ported from the v1-original sketch; logic unchanged.
+#include <Arduino.h>
 #include <SPI.h>
 #include <LoRa.h>
 #include <SoftwareSerial.h>
@@ -29,6 +31,10 @@ float Humid;
 float batteryLevel;
 const int batteryPin = 36;
 const int RELAY_PIN = 27;
+
+// Forward declarations (the Arduino IDE generates these for .ino files, .cpp needs them)
+void getReadings();
+void sendReadings();
 
 void setup() {
   Serial.begin(115200);
