@@ -19,6 +19,7 @@
 #include "CloudUpload.h"
 #include "HubState.h"
 #include "Network.h"
+#include "Storage.h"
 #include "WebUi.h"
 
 using namespace eg;
@@ -74,7 +75,13 @@ void onAck(uint16_t seq, bool delivered, const proto::Message* ack, void*) {
       hubapp::setRecordResult(f.cmd.id, "no_ack");
     } else if (ok) {
       hubapp::setRecordResult(f.cmd.id, "ok");
-      if (f.cmd.op == hubapp::Op::Dose) state.limiter.record(f.cmd.ch, f.cmd.units, millis());
+      if (f.cmd.op == hubapp::Op::Dose) {
+        uint32_t now = millis();
+        state.limiter.record(f.cmd.ch, f.cmd.units, now);
+        int units[3];
+        for (int i = 0; i < 3; i++) units[i] = state.limiter.unitsInLastHour((safety::Channel)i, now);
+        hubapp::storage::saveDoseUnits(units);
+      }
     } else {
       hubapp::setRecordResult(f.cmd.id, err ? err : "refused");
     }
@@ -149,6 +156,7 @@ void onMessage(const proto::Message& msg, int rssi, void*) {
     a.rssi = rssi;
     EG_LOG("Air: T %.2f H %.1f lux %.1f bat %ld%s%s (rssi %d)", a.t, a.h, a.lux, a.bat, a.err[0] ? " err=" : "", a.err,
            rssi);
+    hubapp::storage::recordAir(a.hasT, a.t, a.hasH, a.h, a.hasLux, a.lux, a.hasBat, a.bat);
     if (a.hasT && a.hasH && a.hasLux) hubapp::cloud::queueAir(a.t, a.h, a.lux, a.bat);
     hubapp::web::onAirReading();
   } else if (msg.type == proto::MsgType::Water && msg.src == ADDR_WATER) {
@@ -165,6 +173,7 @@ void onMessage(const proto::Message& msg, int rssi, void*) {
     state.guard.update(w.r, now);
     EG_LOG("Water: pH %.1f EC %.0f T %.1f%s%s (rssi %d)", w.r.ph, w.r.ec, w.r.temp, w.err[0] ? " err=" : "", w.err,
            rssi);
+    hubapp::storage::recordWater(w.r.hasPh, w.r.ph, w.r.hasEc, w.r.ec, w.r.hasTemp, w.r.temp);
     if (w.r.hasPh && w.r.hasEc && w.r.hasTemp) hubapp::cloud::queueWater(w.r.ph, w.r.ec, w.r.temp);
     hubapp::web::onWaterReading();
   } else if (msg.type == proto::MsgType::Status && msg.src == ADDR_PUMP) {
@@ -227,6 +236,14 @@ void setup() {
   }
   EG_LOG("E-Garden hub, address %u, reset reason: %s", ADDR_HUB, state.resetReason);
   if (state.safeMode) EG_LOG("SAFE MODE: %lu boots without 60 s uptime; schedule and auto dosing are off", (unsigned long)boots);
+
+  hubapp::storage::begin();
+  {
+    int units[3];
+    hubapp::storage::loadDoseUnits(units);
+    StateLock l;
+    for (int i = 0; i < 3; i++) state.limiter.restoreConservative((safety::Channel)i, units[i], millis());
+  }
 
   radio.onMessage(onMessage);
   radio.begin({eg::hub::PIN_LORA_SS, eg::hub::PIN_LORA_RST, eg::hub::PIN_LORA_DIO0}, ADDR_HUB);

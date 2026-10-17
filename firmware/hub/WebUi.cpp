@@ -1,14 +1,14 @@
 // v1-compatible web layer: serves the original dashboard (data/index.html on
-// SPIFFS) and its routes, but every action is queued as a Command for the loop
+// LittleFS, v1 used SPIFFS) and its routes, but every action is queued as a Command for the loop
 // task instead of driving the radio from the web server task.
 #include "WebUi.h"
 
 #include <Arduino.h>
 #include <EGarden.h>
 #include <ESPAsyncWebServer.h>
-#include <SPIFFS.h>
 
 #include "HubState.h"
+#include "Storage.h"
 
 using namespace eg;
 
@@ -38,7 +38,7 @@ String value(const String& var) {
 }
 
 String readFile(const char* path) {
-  File f = SPIFFS.open(path, "r");
+  File f = storage::fs().open(path, "r");
   if (!f || f.isDirectory()) return String();
   String s = f.readString();
   f.close();
@@ -46,7 +46,7 @@ String readFile(const char* path) {
 }
 
 void writeFile(const char* path, const String& text) {
-  File f = SPIFFS.open(path, "w");
+  File f = storage::fs().open(path, "w");
   if (f) {
     f.print(text);
     f.close();
@@ -100,10 +100,9 @@ void okRoute(const char* path) {
 }  // namespace
 
 void begin() {
-  if (!SPIFFS.begin(true)) EG_LOG("Web: SPIFFS mount failed, dashboard page unavailable");
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
-    req->send(SPIFFS, "/index.html", String(), false, processor);
+    req->send(storage::fs(), "/index.html", String(), false, processor);
   });
   for (const char* v : {"Temp", "Humid", "Light", "BATT", "Temp2", "EC", "PH", "rssi", "temperature", "humidity"}) {
     String path = String("/") + v;
