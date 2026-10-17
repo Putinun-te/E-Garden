@@ -1,0 +1,25 @@
+# Local credentials (copy secrets.h.example to secrets.h in the same sketch folder)
+secrets.h
+
+# Team member photos (personal data, not published)
+web project/[0-9]*_n.png
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output
+build/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+
+# IDE / editor files
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*~
+.arduino15/
