@@ -10,7 +10,7 @@ I wrote the ESP32 firmware (controller boxes + LoRa link to the Master box) and 
 
 ## Credits
 
-E-Garden was a team project. I only claim the parts listed under *My role*. The web dashboard was a joint effort with one teammate, and everything else in the project (outside this code) was done by the other team members.
+E-Garden was a team project of 5 students: 2 on hardware, 1 on the website, and 2 on IoT development (firmware and dashboard: me and one teammate). I only claim the parts listed under *My role*. The hardware and the website were done by the other team members.
 
 Third-party material:
 
@@ -18,34 +18,69 @@ Third-party material:
 - Libraries: [arduino-LoRa](https://github.com/sandeepmistry/arduino-LoRa), ESPAsyncWebServer, AsyncTCP, Adafruit AHTX0, BH1750, OneWire, DallasTemperature (all through the Arduino IDE).
 - The dashboard pages load [Highcharts](https://www.highcharts.com), Font Awesome and Google Fonts from their CDNs. Check the Highcharts license before any commercial use.
 
+## Nodes
+
+| Node | Role | Sketch |
+|---|---|---|
+| 1. **E-Garden Hub** (Master node) | LoRa gateway, web dashboard, timing and commands | `Wed_server_F.3.13/` (`LoRa_Master/` earlier) |
+| 2. **Water sensor node** | pH, EC, water temperature, nutrient/acid dosing | `LoRa_Water3.2/` |
+| 3. **Air sensor node** | Light, air temperature and humidity | `LoRa_Air__v1/` |
+| 4. **Pump node** | LoRa-controlled water pump with auto-off timer | `Receive_PUMP_F.1/` |
+
 ## Hardware
 
-- ESP32 boards (one per box)
-- LoRa transceiver modules, 433 MHz (SX127x class, used through arduino-LoRa)
-- RS485 / Modbus pH + temperature sensor and RS485 / Modbus EC sensor, with an RS485 transceiver module (DE/RE control)
-- DS18B20 temperature sensor
-- BH1750 light sensor
-- AM2305 temperature / humidity sensor (read with the Adafruit AHTX0 library)
-- Stepper-driven dosing pumps (channels A, B and Acid)
-- Relay module for the water pump
-- Battery voltage measurement through an ADC pin, with deep sleep on the battery-powered sensor boxes
+Common to every node: ESP32 board and a 433 MHz LoRa module (SX127x class, used through arduino-LoRa).
+
+**1. E-Garden Hub (Master node)**
+- ESP32 with Wi-Fi (dashboard, NTP time)
+- LoRa module: SS 5, RST 15, DIO0 2
+
+**2. Water sensor node**
+- RS485 / Modbus pH + temperature sensor
+- RS485 / Modbus EC sensor
+- RS485 transceiver module (DE 33, RE 32, serial on pins 26/27 at 9600 baud)
+- 3 stepper-driven dosing pumps: A (pin 21), B (pin 2), Acid (pin 0); direction 16, enable 4
+- LoRa module: SS 5, RST 15, DIO0 17
+- Battery voltage measurement through an ADC pin
+
+**3. Air sensor node**
+- BH1750 light sensor (I²C)
+- AM2305 temperature / humidity sensor (I²C, read with the Adafruit AHTX0 library)
+- Battery voltage measurement on ADC pin 36, deep sleep between readings
+- LoRa module: SS 5, RST 15, DIO0 2
+- DS18B20: its libraries are included in the sketch, but the sensor is not read in the final code
+
+**4. Pump node**
+- Relay module on pin 26 switching the water pump
+- LoRa module: SS 5, RST 14, DIO0 2
+
+Pins are taken from the final sketches listed above. Earlier snapshots in `Dev/` use different pins and addresses.
 
 ## Architecture
 
-```
- Air box ──┐                                          ┌── web dashboard (served from SPIFFS)
- Water box ┼── LoRa 433 MHz ──► Master box (ESP32) ───┤
- Pump box ◄┘◄── commands ───────        │              └── optional HTTP GET to a cloud server
-                                    Wi-Fi / NTP
+```mermaid
+flowchart LR
+    AQ["Water sensor node<br/>pH · EC · temp · dosing pumps"]
+    AE["Air sensor node<br/>light · temp · humidity"]
+    PU["Pump node<br/>relay + timer"]
+    HUB["E-Garden Hub<br/>(Master node)<br/>LoRa + Wi-Fi + NTP"]
+    WEB["Web dashboard<br/>Highcharts, served from SPIFFS"]
+    CLOUD["Optional cloud server<br/>HTTP GET"]
+
+    AQ -- "LoRa 433 MHz: readings" --> HUB
+    AE -- "LoRa 433 MHz: readings" --> HUB
+    HUB -- "LoRa: Add(A) / Add(B) / Add(Acid)" --> AQ
+    HUB -- "LoRa: On / oFF" --> PU
+    HUB --> WEB
+    HUB -.-> CLOUD
 ```
 
-- **Controller boxes (ESP32 + LoRa)**
-  - *Air box*: light (BH1750), air temperature and humidity, battery level.
-  - *Water box*: pH, water temperature and EC from the RS485/Modbus sensors; receives dosing commands (`Add(A)`, `Add(B)`, `Add(Acid)`) and drives the stepper pumps.
-  - *Pump box*: LoRa-controlled relay for the water pump (`On` / `oFF`), with an automatic off timer.
-- **Master box (ESP32 + LoRa + Wi-Fi)**: receives the sensor packets, keeps time over NTP, serves the dashboard, and sends commands back to the boxes. One sketch also forwards readings to a cloud server with an HTTP GET.
+- The **water sensor node** reads pH, water temperature and EC over RS485/Modbus, sends them to the Hub, and doses nutrients A, B and acid when the Hub sends `Add(A)`, `Add(B)` or `Add(Acid)`.
+- The **air sensor node** measures light, air temperature and humidity, and battery level, then sleeps between readings.
+- The **pump node** switches the water pump on `On` and off on `oFF`, with an automatic off timer.
+- The **E-Garden Hub** receives the sensor packets, keeps time over NTP, serves the dashboard, and sends commands back to the nodes. One sketch (`LoRa_Master/`) also forwards readings to a cloud server with an HTTP GET.
 - **LoRa link**: 433 MHz with a sync word per network (`0xAA` / `0xAB`, depending on the sketch). Packets are plain text, for example a reading is `readingID@address/value1&value2$value3#value4^` and a command is `readingID@address/command&amount$`.
-- **Dashboard**: a Highcharts page (`data/index.html`) served by the Master box from SPIFFS, plus static page mockups in `web project/`.
+- **Dashboard**: a Highcharts page (`data/index.html`) served by the Hub from SPIFFS, plus static page mockups in `web project/`.
 
 ## Repository layout
 
@@ -74,7 +109,7 @@ Wi-Fi credentials (and the cloud server URL for the `LoRa_Master` sketches) are 
 
 ## Build and run
 
-Arduino IDE with the ESP32 board package and the libraries above. For the sketches that have a `data/` folder (the Master box), upload it to the board with the ESP32 sketch data upload tool.
+Arduino IDE with the **ESP32 board package (arduino-esp32) version 2.0.17**, which is what the original code was built and run with, and the libraries above. For the sketches that have a `data/` folder (the Master box), upload it to the board with the ESP32 sketch data upload tool.
 
 ## Notes
 
