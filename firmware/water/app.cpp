@@ -1,311 +1,188 @@
-// E-Garden water node. Ported from the v1-original sketch; logic unchanged.
+// E-Garden water sensor node: reads pH, water temperature and EC from the RS485
+// probes every 30 s, reports them to the hub, and runs the dosing pumps on
+// command.
+//
+// v1 behaviour kept: probe request bytes and x10 scaling, 30 s interval, pins,
+// step counts per unit, pulse timing, channel-to-pin mapping, drivers enabled
+// at boot.
+// Changed (approved): protocol v2 with ACK, Stop works, Modbus on a hardware
+// UART with reply timeout and CRC check, non-blocking stepping, and dosing is
+// refused when it breaks a safety rule (see EGardenSafety.h).
 #include <Arduino.h>
 #include <EGarden.h>
-// Libraries for LoRa Module
-#include <SPI.h>
-#include <LoRa.h>
-#include <SoftwareSerial.h>
+#include <Preferences.h>
 
-#define RE eg::water::PIN_RS485_RE
-#define DE eg::water::PIN_RS485_DE
+using namespace eg;
 
+namespace {
 
-#define Pump_A eg::water::PIN_DOSE_STEP_ACID
-#define Pump_B eg::water::PIN_DOSE_STEP_B
-#define Pump_C eg::water::PIN_DOSE_STEP_A
+LoRaLink radio;
+ModbusProbe probe;
+StepperDoser doser;
+safety::ReadingGuard guard;
+safety::DoseLimiter limiter;
+Preferences prefs;
 
-#define X_DIR eg::water::PIN_DOSE_DIR
-#define X_EN eg::water::PIN_DOSE_EN
+const char* const kPrefKeys[safety::CHANNEL_COUNT] = {"uA", "uB", "uACID"};
 
-String message;
-String localAddress = String(eg::ADDR_WATER);
+// Measurement sequence: pH/temperature probe, then EC probe, then report.
+enum class Step : uint8_t { Wait, ReadPhTemp, ReadEc };
+Step step = Step::Wait;
+uint32_t lastMeasureMs = 0;
+bool firstMeasureDone = false;
+safety::WaterReading reading;
+bool phFailed = false, ecFailed = false;
 
-String ADD; String Value;
-
-String Local_ID;
-int counter = 0;
-int Var; int Var2; int Var3; int Var1;
-int rssi;
-
-RTC_DATA_ATTR int readingID = 0;
-
-uint64_t uS_TO_S_FACTOR = 1000000;  // Conversion factor for micro seconds to seconds
-// Sleep for 30 minutes = 0.5 hours  = 1800 seconds
-uint64_t TIME_TO_SLEEP = 10;
-
-
-const byte ph_temp [8] = {0x05, 0x03, 0x00, 0x00, 0x00, 0x02, 0xC5, 0x8F};
-const byte ec[] = {0x0A, 0x03, 0x00, 0x01, 0x00, 0x01, 0xD4, 0xB1};
-
-byte values_ph[11];
-byte values_ec[11];
-
-unsigned long lasttime ;
-
-SoftwareSerial mod(eg::water::PIN_RS485_RX, eg::water::PIN_RS485_TX);
-
-float PH, TEMP;
-int EC;
-
-//Variable to hold battery level;
-int batteryPin;
-int batteryLevel;
-const int DIR = 12;
-const int STEP = 14;
-const int  steps_per_rev = 200;
-
-bool Open1 = false; bool Open2 = false; bool Open3 = false;
-
-long now = millis();
-long lastMeasure = 0;
-bool start_timer = false;
-
-// Forward declarations (the Arduino IDE generates these for .ino files, .cpp needs them)
-void step(boolean dir, byte dirPin, byte stepperPin, int steps);
-void start_timer_do();
-void getReadings();
-void sendReadings();
-void Read_all_sensor();
-void Read_PH_TEMP();
-void Read_EC();
-void clear_sensor485();
-void Do();
-void onReceive(int packetSize);
-
-void step (boolean dir, byte dirPin, byte stepperPin, int steps) {
-  digitalWrite (dirPin, dir);
-  for (int i = 0; i < steps; i++)
-  {
-    digitalWrite (stepperPin, HIGH);
-    delayMicroseconds (eg::water::STEP_HALF_PERIOD_US);
-    digitalWrite (stepperPin, LOW);
-    delayMicroseconds (eg::water::STEP_HALF_PERIOD_US);
+void saveDoseHistory() {
+  // Stored so a reboot cannot reset the hourly limit (see restoreConservative).
+  uint32_t now = millis();
+  for (int i = 0; i < safety::CHANNEL_COUNT; i++) {
+    prefs.putUChar(kPrefKeys[i], (uint8_t)limiter.unitsInLastHour((safety::Channel)i, now));
   }
 }
 
-void start_timer_do() {
-  if (start_timer == false) {
-    lastMeasure = millis();
-    start_timer = true;
-    Serial.println("___Timer ON___");
+void sendStatus() {
+  proto::Message sta;
+  sta.type = proto::MsgType::Status;
+  sta.dst = ADDR_HUB;
+  sta.set("dose", doser.busy() ? safety::channelName(doser.channel()) : "none");
+  sta.setInt("left", doser.unitsLeft());
+  radio.send(sta);
+}
+
+void sendReading() {
+  proto::Message m;
+  m.type = proto::MsgType::Water;
+  m.dst = ADDR_HUB;
+  if (reading.hasPh) m.setFloat("ph", reading.ph, 1);
+  if (reading.hasEc) m.setInt("ec", (long)reading.ec);
+  if (reading.hasTemp) m.setFloat("t", reading.temp, 1);
+  if (phFailed || ecFailed) m.set("err", phFailed && ecFailed ? "ph+ec" : (phFailed ? "ph" : "ec"));
+  radio.send(m);
+  EG_LOG("Water: pH %s EC %s T %s%s", m.has("ph") ? m.get("ph") : "-", m.has("ec") ? m.get("ec") : "-",
+         m.has("t") ? m.get("t") : "-", guard.locked() ? " (dosing locked: out of range)" : "");
+}
+
+void runMeasurement() {
+  uint32_t now = millis();
+  switch (step) {
+    case Step::Wait:
+      // v1 took the first reading 30 s after boot, then every 30 s.
+      if (now - lastMeasureMs >= water::MEASURE_INTERVAL_MS || (!firstMeasureDone && now >= water::MEASURE_INTERVAL_MS)) {
+        reading = safety::WaterReading();
+        phFailed = ecFailed = false;
+        probe.start(modbus::PH_TEMP_SLAVE, modbus::PH_TEMP_FIRST, modbus::PH_TEMP_COUNT);
+        step = Step::ReadPhTemp;
+      }
+      break;
+    case Step::ReadPhTemp:
+      if (!probe.poll()) break;
+      if (probe.result() == modbus::FrameError::None) {
+        reading.hasTemp = reading.hasPh = true;
+        reading.temp = probe.reg(0) / 10.0f;  // v1 scaling
+        reading.ph = probe.reg(1) / 10.0f;
+      } else {
+        phFailed = true;
+        EG_LOG("Water: pH probe read failed (%s)", modbus::frameErrorName(probe.result()));
+      }
+      probe.start(modbus::EC_SLAVE, modbus::EC_FIRST, modbus::EC_COUNT);
+      step = Step::ReadEc;
+      break;
+    case Step::ReadEc:
+      if (!probe.poll()) break;
+      if (probe.result() == modbus::FrameError::None) {
+        reading.hasEc = true;
+        reading.ec = (float)(probe.reg(0) / 10);  // v1 used integer division
+      } else {
+        ecFailed = true;
+        EG_LOG("Water: EC probe read failed (%s)", modbus::frameErrorName(probe.result()));
+      }
+      guard.update(reading, now);
+      sendReading();
+      lastMeasureMs = now;
+      firstMeasureDone = true;
+      step = Step::Wait;
+      break;
   }
 }
+
+void handleCommand(const proto::Message& msg) {
+  const char* op = msg.get("op");
+  const char* chName = msg.get("ch");
+  if (op && strcmp(op, "stop") == 0) {
+    safety::Channel ch;
+    bool all = chName && strcmp(chName, "ALL") == 0;
+    if (!all && !safety::parseChannel(chName, ch)) {
+      radio.ack(msg, false, "bad_cmd");
+      return;
+    }
+    if (doser.busy() && (all || doser.channel() == ch)) doser.stop();
+    radio.ack(msg, true);
+    sendStatus();
+    return;
+  }
+  if (!op || strcmp(op, "dose") != 0) {
+    radio.ack(msg, false, "bad_cmd");
+    return;
+  }
+  safety::Channel ch;
+  long units;
+  if (!safety::parseChannel(chName, ch) || !msg.getInt("n", units)) {
+    radio.ack(msg, false, "bad_cmd");
+    return;
+  }
+  uint32_t now = millis();
+  safety::Refusal r = doser.busy() ? safety::Refusal::Busy : guard.check(now);
+  if (r == safety::Refusal::None) r = limiter.check(ch, (int)units, now);
+  if (r != safety::Refusal::None) {
+    EG_LOG("Dose: refused %s x%ld (%s)", safety::channelName(ch), units, safety::refusalName(r));
+    radio.ack(msg, false, safety::refusalName(r));
+    return;
+  }
+  limiter.record(ch, (int)units, now);
+  saveDoseHistory();
+  doser.start(ch, (int)units);
+  radio.ack(msg, true);
+  sendStatus();
+}
+
+void onMessage(const proto::Message& msg, int, void*) {
+  if (msg.type != proto::MsgType::Command || msg.src != ADDR_HUB) return;
+  if (radio.replayIfDuplicate(msg)) return;
+  handleCommand(msg);
+}
+
+}  // namespace
 
 void setup() {
+  eg::log::begin(115200);
+  EG_LOG("E-Garden water node, address %u", ADDR_WATER);
 
-  Serial.begin(115200);
-  mod.begin(eg::water::RS485_BAUD);
-  pinMode(STEP, OUTPUT);
-  pinMode(DIR, OUTPUT);
-  pinMode(RE, OUTPUT);
-  pinMode(DE, OUTPUT);
+  const StepperDoser::ChannelPins channels[safety::CHANNEL_COUNT] = {
+      {water::PIN_DOSE_STEP_A, water::STEPS_PER_UNIT_A},
+      {water::PIN_DOSE_STEP_B, water::STEPS_PER_UNIT_B},
+      {water::PIN_DOSE_STEP_ACID, water::STEPS_PER_UNIT_ACID},
+  };
+  doser.begin(channels, water::PIN_DOSE_DIR, water::PIN_DOSE_EN, water::DOSE_DIRECTION, water::STEP_HALF_PERIOD_US);
+  probe.begin(Serial2, water::PIN_RS485_RX, water::PIN_RS485_TX, water::RS485_BAUD, water::PIN_RS485_DE,
+              water::PIN_RS485_RE, water::MODBUS_SETTLE_MS);
 
-  pinMode (Pump_A, OUTPUT);
-  pinMode (Pump_B, OUTPUT);
-  pinMode (Pump_C, OUTPUT);
-  pinMode (X_EN, OUTPUT);
-  pinMode (X_DIR, OUTPUT);
-  digitalWrite (X_EN, LOW);
-
-  LoRa.setPins(eg::water::PIN_LORA_SS, eg::water::PIN_LORA_RST, eg::water::PIN_LORA_DIO0);
-  Serial.println("initializing LoRa");
-  int counter = 0;
-  while (!LoRa.begin(eg::LORA_FREQUENCY_HZ) && counter < eg::LORA_INIT_ATTEMPTS) {
-    Serial.print(".");
-    counter++;
-    delay(500);
+  prefs.begin("egwater", false);
+  for (int i = 0; i < safety::CHANNEL_COUNT; i++) {
+    uint8_t units = prefs.getUChar(kPrefKeys[i], 0);
+    if (units) {
+      limiter.restoreConservative((safety::Channel)i, units, millis());
+      EG_LOG("Dose: %u units on %s counted from before the reboot", units, safety::channelName((safety::Channel)i));
+    }
   }
-  if (counter == eg::LORA_INIT_ATTEMPTS) {
-    readingID++;
-    Serial.println("Failed to initialize LoRa. Going to sleep now");
-  }
-  LoRa.setSyncWord(eg::LORA_SYNC_WORD);
-  Serial.println("LoRa initializing OK!");
 
-  LoRa.onReceive(onReceive);
-  LoRa.receive();
+  radio.onMessage(onMessage);
+  radio.begin({water::PIN_LORA_SS, water::PIN_LORA_RST, water::PIN_LORA_DIO0}, ADDR_WATER);
 }
 
 void loop() {
-  start_timer_do();
-  now = millis();
-  if (start_timer && (now - lastMeasure > eg::water::MEASURE_INTERVAL_MS)) {
-    Do();
-    start_timer = false;
-  }
-
-
-  if (Open1 == true) {
-    Serial.println(Var1);
-    LoRa.beginPacket();
-    LoRa.print("");
-    LoRa.endPacket();
-    for (int a = 0; a < Var1; a++) {
-      step (eg::water::DOSE_DIRECTION, X_DIR, Pump_C, eg::water::STEPS_PER_UNIT_A);
-    }
-    digitalWrite (X_EN, LOW);
-    Open1 = false;
-  }
-  if (Open2 == true) {
-    Serial.println(Var2);
-    LoRa.beginPacket();
-    LoRa.print("");
-    LoRa.endPacket();
-    for (int a = 0; a < Var2; a++) {
-      step (eg::water::DOSE_DIRECTION, X_DIR, Pump_B, eg::water::STEPS_PER_UNIT_B);
-    }
-    digitalWrite (X_EN, LOW);
-    Open2 = false;
-  }  if (Open3 == true) {
-    Serial.println(Var3);
-    LoRa.beginPacket();
-    LoRa.print("");
-    LoRa.endPacket();
-    for (int a = 0; a < Var3; a++) {
-      step (eg::water::DOSE_DIRECTION, X_DIR, Pump_A, eg::water::STEPS_PER_UNIT_ACID);
-    }
-    LoRa.receive();
-    digitalWrite (X_EN, LOW);
-    Open3 = false;
-  }
-}
-
-
-void getReadings() {
-
-  float analog_volt = 0;
-  for (int i = 0; i < 20; i++)
-  {
-    analog_volt += analogRead(batteryPin);
-    delay(50);
-  }
-  float batteryVolt = ((analog_volt / 20) / 4095) * 4.2;
-  analog_volt = 0;
-  batteryLevel = (batteryVolt / 4.2) * 100;
-}
-
-void sendReadings() {
-  message = String(readingID) + "@" + String(localAddress) + "/" + String(PH) + "&" +
-            String(EC) + "$" + String(TEMP) + "#";
-
-  LoRa.beginPacket();
-  LoRa.print(message);
-  LoRa.endPacket();
-}
-
-void Read_all_sensor() {
-  Read_PH_TEMP();  delay(500);  Read_PH_TEMP();  delay(500);
-  clear_sensor485();
-
-  Read_EC();  delay(500);  Read_EC();  delay(500);
-  clear_sensor485();
-  
-//  if (Read_EC() >= 1600 && Read_EC() <= 1700){
-//    Read_all_sensor();
-//  }
-//  else(){
-//    Do();
-//  }
-
-}
-
-void Read_PH_TEMP() {
-  digitalWrite(DE, HIGH);
-  digitalWrite(RE, HIGH);
-  delay(100);
-  if (mod.write(ph_temp, sizeof(ph_temp)) == 8) {
-    digitalWrite(DE, LOW);
-    digitalWrite(RE, LOW);
-    for (byte i = 0; i < 9; i++) {
-      values_ph[i] = mod.read();
-    }
-  }
-  PH = float((uint16_t)(values_ph[5] << 8) | (values_ph[6])) / 10 ;
-  TEMP = float((uint16_t)(values_ph[3] << 8) | (values_ph[4])) / 10;
-}
-
-void Read_EC() {
-  digitalWrite(DE, HIGH);
-  digitalWrite(RE, HIGH);
-  delay(100);
-  if (mod.write(ec, sizeof(ec)) == 8) {
-    digitalWrite(DE, LOW);
-    digitalWrite(RE, LOW);
-    for (byte i = 0; i < 9; i++) {
-      values_ec[i] = mod.read();
-    }
-  }
-  EC = ((uint16_t)(values_ec[3] << 8) | (values_ec[4])) / 10 ;
-}
-
-void clear_sensor485() {
-  for (byte i = 0; i < 11; i++) {
-    values_ph[i] = 0;
-  }
-  for (byte i = 0; i < 9; i++) {
-    values_ec[i] = 0;
-  }
-}
-
-void Do() {
-
-  Read_all_sensor();
-  Serial.print("Temperature Celsius = ");
-  Serial.println(TEMP);
-  Serial.print("PH: ");
-  Serial.println(PH);
-  Serial.print("EC: ");
-  Serial.println(EC);
-  Serial.print("Reading ID = ");
-  Serial.println(readingID);
-
-
-  sendReadings();
-  Serial.print("Message sent = ");
-  Serial.println(message);
-  message = "";
-
-  readingID++;
-  LoRa.receive();
-}
-
-void onReceive(int packetSize) {
-  if (packetSize == 0) return;          // if there's no packet, return
-
-  while (LoRa.available()) {
-    Serial.print("Received packet '");
-    String LoRaData = LoRa.readString();
-    Serial.print(LoRaData);
-    // print RSSI of packet
-    Serial.print("' with RSSI ");
-    Serial.print(LoRa.packetRssi());
-    Serial.print(", Snr: ");
-    Serial.println(LoRa.packetSnr());
-
-    int pos1 = LoRaData.indexOf('@');
-    int pos2 = LoRaData.indexOf('/');
-    int pos3 = LoRaData.indexOf('&');
-    int pos4 = LoRaData.indexOf('$');
-    Local_ID = LoRaData.substring(pos1 + 1, pos2);
-    if (Local_ID == String(eg::ADDR_HUB)) {
-      ADD = LoRaData.substring(pos2 + 1, pos3);
-      Value = LoRaData.substring(pos3 + 1, pos4);
-      Serial.println(ADD); Serial.println(Value);
-      Var = Value.toInt(); Serial.println(Var);
-      if (Var < 0) {
-        Var = 0;
-      }
-
-      digitalWrite (X_EN, LOW);
-      if (ADD == "Add(A)") {
-        Var1 = Var; Open1 = true;
-      }
-      if (ADD == "Add(B)") {
-        Var2 = Var; Open2 = true;
-      }
-      if (ADD == "Add(Acid)") {
-        Var3 = Var; Open3 = true;
-      }
-    }
-  }
+  radio.poll();
+  doser.poll();
+  if (doser.takeFinished()) sendStatus();
+  runMeasurement();
 }
