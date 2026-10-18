@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E-Garden Hub</title>
+<style>
+:root{--bg:#f4f6f3;--card:#fff;--fg:#1d2a1f;--muted:#5f6f62;--line:#dfe5dc;--accent:#2f7d4f;--warn:#b26a00;--bad:#b3261e;--ok:#2f7d4f;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#121613;--card:#1b211c;--fg:#e4ebe4;--muted:#9aa89c;--line:#2c352d;--accent:#5cbf84;--warn:#e0a03a;--bad:#ef6b62;--ok:#5cbf84}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:18px;margin:0 auto 0 0}
+.chip{font-size:12px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.ok{color:var(--ok);border-color:var(--ok)}.chip.bad{color:var(--bad);border-color:var(--bad)}.chip.warn{color:var(--warn);border-color:var(--warn)}
+nav{display:flex;gap:4px;padding:8px 16px 0;max-width:1100px;margin:0 auto}
+nav button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:8px 10px;font:inherit;cursor:pointer}
+nav button.on{color:var(--fg);border-bottom-color:var(--accent)}
+main{max-width:1100px;margin:0 auto;padding:12px 16px 40px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px}
+.vals{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.v b{display:block;font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.v span{font-size:12px;color:var(--muted)}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+.note.bad{color:var(--bad)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+button.act,input,select{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+button.act{cursor:pointer;background:var(--accent);border-color:var(--accent);color:#fff}
+button.act.alt{background:none;color:var(--fg);border-color:var(--line)}
+button.act.stop{background:var(--bad);border-color:var(--bad)}
+input{min-width:0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:500}
+.console{font:12px/1.5 var(--mono);background:#0d110e;color:#cfe3d2;border-radius:8px;padding:10px;height:420px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+.chart{margin-top:6px}
+.chart svg{width:100%;height:120px;display:block}
+.chart .t{font-size:12px;color:var(--muted);display:flex;justify-content:space-between}
+.hide{display:none}
+form label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+form input{width:100%}
+</style>
+</head>
+<body>
+<header>
+  <h1>E-Garden Hub</h1>
+  <span class="chip" id="cWifi">Wi-Fi</span>
+  <span class="chip" id="cLora">LoRa</span>
+  <span class="chip" id="cClock">Clock</span>
+  <span class="chip hide bad" id="cSafe">Safe mode</span>
+</header>
+<nav>
+  <button data-tab="dash" class="on">Dashboard</button>
+  <button data-tab="hist">History</button>
+  <button data-tab="cons">Console</button>
+  <button data-tab="setup">Setup</button>
+</nav>
+<main>
+<section id="dash">
+  <div class="grid">
+    <div class="card"><h2>Water sensor node</h2>
+      <div class="vals">
+        <div class="v"><b id="ph">–</b><span>pH</span></div>
+        <div class="v"><b id="ec">–</b><span>EC</span></div>
+        <div class="v"><b id="wt">–</b><span>Water °C</span></div>
+        <div class="v"><b id="wage">–</b><span>Last reading</span></div>
+      </div>
+      <div class="note" id="wnote"></div>
+    </div>
+    <div class="card"><h2>Air sensor node</h2>
+      <div class="vals">
+        <div class="v"><b id="at">–</b><span>Air °C</span></div>
+        <div class="v"><b id="ah">–</b><span>Humidity %</span></div>
+        <div class="v"><b id="lux">–</b><span>Light lx</span></div>
+        <div class="v"><b id="bat">–</b><span>Battery %</span></div>
+      </div>
+      <div class="note" id="anote"></div>
+    </div>
+    <div class="card"><h2>Pump node</h2>
+      <div class="vals">
+        <div class="v"><b id="pump">–</b><span>Water pump</span></div>
+        <div class="v"><b id="pleft">–</b><span>Auto-off in</span></div>
+      </div>
+      <div class="row">
+        <button class="act" data-cmd="op=pump&on=1">Pump on</button>
+        <button class="act alt" data-cmd="op=pump&on=0">Pump off</button>
+      </div>
+      <div class="note">Turns itself off after 90 s. Schedule: on at HH:00, off at HH:01, 08–17.</div>
+    </div>
+    <div class="card"><h2>Dosing</h2>
+      <div class="vals">
+        <div class="v"><b id="dose">–</b><span>Running</span></div>
+        <div class="v"><b id="dused">–</b><span>Units used this hour A / B / Acid</span></div>
+      </div>
+      <div class="row">
+        <select id="dch"><option>A</option><option>B</option><option value="ACID">Acid</option></select>
+        <input id="dn" type="number" min="1" max="5" value="1" style="width:70px" aria-label="Units">
+        <button class="act" id="dgo">Dose</button>
+        <button class="act stop" data-cmd="op=stop&ch=ALL">Stop all</button>
+      </div>
+      <div class="note" id="dnote">Max 5 units per dose, 25 per channel per hour, 20 s apart. Needs a fresh, valid pH/EC reading.</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px"><h2>Recent commands</h2>
+    <table><thead><tr><th>#</th><th>Command</th><th>Result</th><th>Age</th></tr></thead><tbody id="cmds"></tbody></table>
+  </div>
+</section>
+
+<section id="hist" class="hide">
+  <div class="card"><h2>Last 24 hours (one point per minute, stored on the hub)</h2>
+    <div id="charts"></div>
+    <div class="note" id="hnote"></div>
+  </div>
+</section>
+
+<section id="cons" class="hide">
+  <div class="card"><h2>Serial console (live)</h2>
+    <div class="console" id="log"></div>
+    <div class="row"><label style="font-size:13px"><input type="checkbox" id="follow" checked> Follow</label></div>
+  </div>
+</section>
+
+<section id="setup" class="hide">
+  <div class="grid">
+    <div class="card"><h2>Wi-Fi</h2>
+      <div id="wifi" class="note"></div>
+      <form id="fwifi">
+        <label for="ssid">Network name (SSID)</label><input id="ssid" maxlength="32" required>
+        <label for="pass">Password</label><input id="pass" type="password" maxlength="64" placeholder="Leave empty for an open network">
+        <div class="row"><button class="act">Save and connect</button></div>
+      </form>
+    </div>
+    <div class="card"><h2>Web password</h2>
+      <div class="note" id="pwnote">User name: admin</div>
+      <form id="fpw">
+        <label for="pw">New password (8+ characters)</label><input id="pw" type="password" minlength="8" maxlength="64" required>
+        <div class="row"><button class="act">Change password</button></div>
+      </form>
+    </div>
+    <div class="card"><h2>System</h2><table><tbody id="sys"></tbody></table></div>
+  </div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let S=null, logSince=0;
+const fmt=(v,d)=>v===null||v===undefined?'–':Number(v).toFixed(d);
+const age=s=>s===null||s===undefined?'–':s<60?s+' s':s<3600?Math.floor(s/60)+' min':Math.floor(s/3600)+' h';
+const chip=(el,txt,cls)=>{el.textContent=txt;el.className='chip '+cls};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['dash','hist','cons','setup'].forEach(t=>$(t).classList.toggle('hide',t!==b.dataset.tab));
+  if(b.dataset.tab==='hist')loadHistory();
+});
+
+async function send(body){
+  const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+  if(!r.ok)alert('Command not accepted: '+await r.text());
+  setTimeout(refresh,300);
+}
+document.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=()=>send(b.dataset.cmd));
+$('dgo').onclick=()=>send('op=dose&ch='+$('dch').value+'&n='+$('dn').value);
+
+async function refresh(){
+  try{const r=await fetch('/api/state');if(!r.ok)return;S=await r.json();render()}catch(e){chip($('cWifi'),'Hub offline','bad')}
+}
+function render(){
+  const w=S.water,a=S.air,p=S.pump,d=S.dose,sys=S.system;
+  chip($('cWifi'),S.wifi.connected?'Wi-Fi '+S.wifi.ssid:(S.wifi.ap?'Setup AP':'Wi-Fi down'),S.wifi.connected?'ok':'bad');
+  chip($('cLora'),S.lora.ready?'LoRa ok':'LoRa down',S.lora.ready?'ok':'bad');
+  chip($('cClock'),S.clock.synced?S.clock.local:'Clock not synced',S.clock.synced?'ok':'warn');
+  $('cSafe').classList.toggle('hide',!sys.safeMode);
+  $('ph').textContent=fmt(w.ph,1);$('ec').textContent=fmt(w.ec,0);$('wt').textContent=fmt(w.t,1);$('wage').textContent=age(w.age);
+  $('wnote').textContent=(w.err?'Sensor error: '+w.err+'. ':'')+(w.dosing==='ok'?'Dosing allowed.':'Dosing blocked: '+w.dosing+'.');
+  $('wnote').className='note'+(w.dosing==='ok'?'':' bad');
+  $('at').textContent=fmt(a.t,1);$('ah').textContent=fmt(a.h,0);$('lux').textContent=fmt(a.lux,0);$('bat').textContent=fmt(a.bat,0);
+  $('anote').textContent=(a.err?'Sensor error: '+a.err+'. ':'')+'Last reading: '+age(a.age);
+  $('pump').textContent=p.known?(p.on?'ON':'OFF'):'unknown';$('pleft').textContent=p.on?p.left+' s':'–';
+  $('dose').textContent=d.known?(d.dose==='none'?'none':d.dose+' ('+d.left+' left)'):'unknown';
+  $('dused').textContent=S.limits.used.join(' / ');
+  $('cmds').innerHTML=S.commands.map(c=>`<tr><td>${c.id}</td><td>${esc(c.text)}</td><td>${esc(c.result)}</td><td>${age(c.age)}</td></tr>`).join('');
+  $('wifi').innerHTML=S.wifi.connected?`Connected to <b>${esc(S.wifi.ssid)}</b>, IP ${S.wifi.ip}, also at http://${S.wifi.mdns}:${location.port||80}`:
+    (S.wifi.ap?`Not connected. Setup network "${esc(S.wifi.apSsid)}" is on.`:'Not connected, retrying.');
+  $('pwnote').textContent='User name: admin'+(sys.defaultPassword?'. You are still using the default password: please change it.':'');
+  $('pwnote').className='note'+(sys.defaultPassword?' bad':'');
+  const rows=[['Uptime',age(sys.uptime)],['Reset reason',sys.resetReason],['Boot count',sys.boots],['Free heap',sys.heap+' bytes'],
+    ['History stored',sys.historyBytes+' bytes'],['LoRa rx / bad / tx',S.lora.rx+' / '+S.lora.bad+' / '+S.lora.tx],
+    ['LoRa retries / no ACK',S.lora.retries+' / '+S.lora.undelivered],['Last RSSI',S.lora.rssi+' dBm'],
+    ['Auto dosing',sys.autoDosing?'compiled in':'off (build flag)'],['Cloud upload',sys.cloud?'compiled in':'off (build flag)']];
+  $('sys').innerHTML=rows.map(r=>`<tr><th>${r[0]}</th><td>${esc(r[1])}</td></tr>`).join('');
+}
+
+function addLog(lines){
+  const el=$('log');
+  for(const l of lines){el.append(l+'\n');}
+  while(el.childNodes.length>600)el.removeChild(el.firstChild);
+  if($('follow').checked)el.scrollTop=el.scrollHeight;
+}
+async function loadLogs(){
+  const r=await fetch('/api/logs?since='+logSince);if(!r.ok)return;
+  const j=await r.json();addLog(j.lines.map(x=>x[1]));if(j.lines.length)logSince=j.lines[j.lines.length-1][0];
+}
+function startEvents(){
+  const es=new EventSource('/events');
+  es.addEventListener('log',e=>{const i=e.data.indexOf(' ');const id=+e.data.slice(0,i);if(id>logSince){logSince=id;addLog([e.data.slice(i+1)])}});
+  es.addEventListener('reading',()=>refresh());
+  es.onerror=()=>{};
+}
+
+async function loadHistory(){
+  const parts=await Promise.all(['1','0'].map(p=>fetch('/api/history?part='+p).then(r=>r.ok?r.text():'')));
+  const rows=parts.join('').trim().split('\n').filter(Boolean).map(l=>l.split(','));
+  const now=Date.now()/1000;
+  const pick=(type,col)=>rows.filter(r=>r[3]===type&&r[col]!==''&&+r[0]>0&&now-r[0]<86400).map(r=>[+r[0],+r[col]]);
+  const series=[['pH','W',4],['EC','W',5],['Water °C','W',6],['Air °C','A',4],['Humidity %','A',5],['Light lx','A',6]];
+  $('charts').innerHTML=series.map(([n,t,c])=>chart(n,pick(t,c))).join('');
+  $('hnote').textContent=rows.length?'':'No history yet.';
+}
+function chart(name,pts){
+  if(pts.length<2)return `<div class="chart"><div class="t"><span>${name}</span><span>not enough data</span></div></div>`;
+  const W=600,H=120,xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
+  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys),dy=(y1-y0)||1;
+  const path=pts.map((p,i)=>(i?'L':'M')+((p[0]-x0)/(x1-x0||1)*W).toFixed(1)+' '+(H-6-(p[1]-y0)/dy*(H-12)).toFixed(1)).join(' ');
+  return `<div class="chart"><div class="t"><span>${name}</span><span>${y0.toFixed(1)} – ${y1.toFixed(1)}, last ${ys[ys.length-1]}</span></div>
+  <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg></div>`;
+}
+
+async function postForm(url,data){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});
+  alert(await r.text());refresh();
+}
+$('fwifi').onsubmit=e=>{e.preventDefault();postForm('/api/wifi',{ssid:$('ssid').value,password:$('pass').value})};
+$('fpw').onsubmit=e=>{e.preventDefault();postForm('/api/password',{password:$('pw').value})};
+
+refresh();loadLogs().then(startEvents);setInterval(refresh,5000);
+</script>
+</body>
+</html>
