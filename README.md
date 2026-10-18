@@ -126,7 +126,7 @@ API: `GET /api/state`, `/api/logs?since=N`, `/api/history?part=0|1`, `/events` (
 
 The code builds with **PlatformIO** or the **Arduino IDE**, with arduino-esp32 **2.0.17** (the core the project used).
 
-First, in `firmware/hub`, copy `secrets.h.example` to `secrets.h` and fill in your Wi-Fi network and passwords (`secrets.h` is git-ignored; without it the hub builds with placeholders and you set Wi-Fi from the setup page).
+First, in `firmware/hub`, copy `secrets.example.h` to `secrets.h` and fill in your Wi-Fi network and passwords (`secrets.h` is git-ignored; without it the hub builds with placeholders and you set Wi-Fi from the setup page).
 
 ### PlatformIO
 

@@ -27,10 +27,18 @@ def render() -> str:
     )
 
 
+def embedded_page() -> bytes:
+    import re
+    data = bytes(int(h, 16) for h in re.findall(r"0x([0-9a-f]{2})", OUT.read_text().split("PROGMEM", 1)[1]))
+    return gzip.decompress(data)
+
+
 def main() -> int:
     text = render()
     if "--check" in sys.argv:
-        if not OUT.exists() or OUT.read_text() != text:
+        # Compare the decompressed bytes: gzip output can differ between zlib
+        # versions (macOS vs Linux) even for identical input.
+        if not OUT.exists() or embedded_page() != SRC.read_bytes():
             print("web_index.h is out of date: run python3 tools/embed_web.py", file=sys.stderr)
             return 1
         print("web_index.h is up to date")

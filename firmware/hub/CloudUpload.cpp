@@ -10,11 +10,11 @@
 #if __has_include("secrets.h")
 #include "secrets.h"
 #else
-#include "secrets.h.example"
+#include "secrets.example.h"
 #endif
 
 #ifndef SERVER_URL
-#error "ENABLE_CLOUD_UPLOAD needs SERVER_URL in secrets.h (see secrets.h.example)"
+#error "ENABLE_CLOUD_UPLOAD needs SERVER_URL in secrets.h (see secrets.example.h)"
 #endif
 #endif
 

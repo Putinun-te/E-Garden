@@ -25,7 +25,7 @@ jobs:
             ~/.cache/pip
           key: pio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
       - run: pip install platformio==6.2.0
-      - name: Build ${{ matrix.env }} (secrets.h comes from secrets.h.example)
+      - name: Build ${{ matrix.env }} (secrets.h falls back to secrets.example.h)
         run: pio run -e ${{ matrix.env }}
 
   native-tests:

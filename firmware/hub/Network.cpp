@@ -11,8 +11,8 @@
 #if __has_include("secrets.h")
 #include "secrets.h"
 #else
-#warning "secrets.h not found: building with placeholder values from secrets.h.example"
-#include "secrets.h.example"
+#warning "secrets.h not found: building with placeholder values from secrets.example.h"
+#include "secrets.example.h"
 #endif
 #ifndef AP_PASSWORD
 #define AP_PASSWORD "egarden-setup"
