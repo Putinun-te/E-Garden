@@ -5,7 +5,7 @@
 An automated hydroponic greenhouse controlled over LoRa (433 MHz) with a web dashboard. E-Garden is the group capstone project of a team of 5 students at Chitralada vocational school (2022–2023).
 
 > **Status: v2 is compile-checked and unit-tested, but has not been run on real hardware.**
-> The original code, exactly as it ran at the end of the project (with only the secrets removed), is at tag [`v1-original`](https://github.com/Putinun-te/E-Garden/tree/v1-original). v2 keeps the v1 pins, timings and sensor handling unless a change is listed below, but nobody has flashed it onto the boards yet, because the hardware no longer exists.
+> The original code, exactly as it ran at the end of the project (with only the secrets removed), is on the [`legacy`](https://github.com/Putinun-te/E-Garden/tree/legacy) branch (tag [`v1-original`](https://github.com/Putinun-te/E-Garden/tree/v1-original) marks the exact original commit). v2 keeps the v1 pins, timings and sensor handling unless a change is listed below, but nobody has flashed it onto the boards yet, because the hardware no longer exists.
 
 ## My role
 
@@ -15,7 +15,7 @@ I wrote the ESP32 firmware (controller boxes + LoRa link to the Master box) and 
 
 E-Garden was a team project of 5 students: 2 on hardware, 1 on the website, and 2 on IoT development (firmware and dashboard: me and one teammate). I only claim the parts listed under *My role*. The hardware and the website were done by the other team members.
 
-- The v1 code (tag `v1-original`) contains form/SPIFFS handling and a DHT web-server sketch adapted from [Random Nerd Tutorials](https://randomnerdtutorials.com) (Rui Santos). That code is not used on this branch.
+- The v1 code (`legacy` branch) contains form/SPIFFS handling and a DHT web-server sketch adapted from [Random Nerd Tutorials](https://randomnerdtutorials.com) (Rui Santos). That code is not used on this branch.
 - Libraries: [arduino-LoRa](https://github.com/sandeepmistry/arduino-LoRa), [ESPAsyncWebServer and AsyncTCP](https://github.com/ESP32Async) (ESP32Async), Adafruit AHTX0, BH1750, Unity (tests).
 
 ## Nodes
@@ -151,6 +151,8 @@ Optional hub features, off by default, are enabled in `platformio.ini` under `[e
 GitHub Actions builds every node with PlatformIO and with `arduino-cli` (core 2.0.17), runs the unit tests, and checks that the embedded web page is up to date.
 
 ## Changes from v1
+
+The v1 code is on the [`legacy`](https://github.com/Putinun-te/E-Garden/tree/legacy) branch for comparison.
 
 | Area | v1 | v2 |
 |---|---|---|
