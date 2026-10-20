@@ -162,6 +162,7 @@ The v1 code is on the [`legacy`](https://github.com/Putinun-te/E-Garden/tree/leg
 | Dosing | No limits; Stop ignored; blocked LoRa while running | Limits + lockout, Stop works, non-blocking |
 | Sensors | Modbus reply read before it arrived; failures sent as values | Timeout + CRC check; failures reported |
 | Air node | Different sync word and address, the hub never received it | Same network as the others |
+| Clock | 7 h daylight-saving offset (Thailand has none) | No DST offset, UTC+7 all year |
 | Wi-Fi | Waited forever at boot, no reconnect | Reconnect, setup access point, mDNS |
 | Radio | Work inside the interrupt; web handlers sent LoRa directly | Polling; one command queue |
 | Data | Lost on reboot | History and counters in flash |
@@ -173,7 +174,6 @@ The v1 code is on the [`legacy`](https://github.com/Putinun-te/E-Garden/tree/leg
 - **Not run on hardware.** Radio timing, Modbus replies, stepper behaviour and the web UI on the real hub are unverified. The web page was checked in a browser against a mock API only.
 - **Strapping pins:** the water node uses GPIO0 and GPIO2 for dosing pumps, and GPIO15 is a LoRa reset pin. External circuits on these pins can stop the board from booting. Kept from v1.
 - **Dosing drivers are always enabled** (EN held LOW, as in v1), so the stepper motors draw current while idle.
-- **NTP daylight offset:** v1 passed a 7 h daylight-saving offset although Thailand has no DST; this may shift the clock. Kept from v1 and flagged in [`EGardenConfig.h`](libraries/EGarden/src/EGardenConfig.h).
 - **Auto dosing** (off by default) follows what the v1 code was meant to do; v1 itself had bugs there (it resent "Add(A)" every second). Review before enabling.
 - **Web login is HTTP basic auth over plain HTTP**: fine on a home network, not on the internet. The LoRa link is not encrypted or authenticated.
 

@@ -28,9 +28,10 @@ constexpr uint16_t WEB_PORT = 8888;  // v1
 
 constexpr const char* NTP_SERVER = "pool.ntp.org";  // v1
 constexpr long NTP_GMT_OFFSET_SEC = 3600L * 7;      // v1 (Thailand, UTC+7)
-// v1 value. Thailand has no DST; with a non-zero value arduino-esp32 builds a
-// TZ string with a DST part, which may shift the clock. Kept until approved.
-constexpr int  NTP_DAYLIGHT_OFFSET_SEC = 3600 * 7;
+// Thailand has no daylight saving time, so this is 0. v1 used 3600 * 7, which
+// makes arduino-esp32 build a TZ string with a DST part and can move the clock
+// (and the pump schedule) 7 hours ahead during the DST rule's summer months.
+constexpr int  NTP_DAYLIGHT_OFFSET_SEC = 0;
 
 // v1 schedule: water pump ON at HH:00 and OFF at HH:01, for HH = 8..17
 constexpr int PUMP_SCHEDULE_FIRST_HOUR = 8;
